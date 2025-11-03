@@ -222,13 +222,21 @@ if __name__ == "__main__":
     import asyncio
 
     async def setup_webhook():
-        webhook_url = f"https://your-bot.onrender.com/webhook"  # Заменить на свой URL
+        # Автоматически формируем URL
+        webhook_url = f"https://{'/'.join(request.url_root.split('/')[2:])}webhook"
         await bot.set_webhook(webhook_url, drop_pending_updates=True)
         logging.info(f"Webhook установлен: {webhook_url}")
 
     # Устанавливаем вебхук
-    asyncio.run(setup_webhook())
+    # Используем текущий URL
+    import atexit
+    def cleanup():
+        import asyncio
+        async def reset_webhook():
+            await bot.delete_webhook()
+        asyncio.run(reset_webhook())
+    atexit.register(cleanup)
 
-    # Запускаем Flask
+    # Просто запускаем Flask
     port = int(os.getenv("PORT", 8000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=False)
