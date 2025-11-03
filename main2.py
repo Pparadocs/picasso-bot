@@ -7,6 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import Update
 from aiogram.types import Message
 from aiogram.filters import Command
+import asyncio
 
 # Логирование
 logging.basicConfig(level=logging.INFO)
@@ -204,11 +205,12 @@ async def admin_approve(message: Message):
 app = Flask(__name__)
 
 @app.route('/webhook', methods=['POST'])
-async def webhook():
+def webhook():
     try:
         json_string = request.get_data().decode('utf-8')
         update = Update.model_validate_json(json_string)
-        await dp.feed_update(bot, update)
+        # Запускаем асинхронную функцию внутри синхронного Flask
+        asyncio.run(dp.feed_update(bot, update))
         return {"ok": True}
     except Exception as e:
         logging.error(f"Ошибка вебхука: {e}")
@@ -219,24 +221,5 @@ def index():
     return "Bot is running", 200
 
 if __name__ == "__main__":
-    import asyncio
-
-    async def setup_webhook():
-        # Автоматически формируем URL
-        webhook_url = f"https://{'/'.join(request.url_root.split('/')[2:])}webhook"
-        await bot.set_webhook(webhook_url, drop_pending_updates=True)
-        logging.info(f"Webhook установлен: {webhook_url}")
-
-    # Устанавливаем вебхук
-    # Используем текущий URL
-    import atexit
-    def cleanup():
-        import asyncio
-        async def reset_webhook():
-            await bot.delete_webhook()
-        asyncio.run(reset_webhook())
-    atexit.register(cleanup)
-
-    # Просто запускаем Flask
     port = int(os.getenv("PORT", 8000))
     app.run(host="0.0.0.0", port=port, debug=False)
