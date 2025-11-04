@@ -54,14 +54,14 @@ async def process_image(message: Message):
         return
 
     try:
-        # ✅ Используем рабочую модель: jagilley/controlnet-scribble
+        # ✅ Используем рабочую модель: lllyasviel/sd-controlnet-canny
         headers = {
             "Authorization": f"Token {REPLICATE_API_TOKEN}",
             "Content-Type": "application/json"
         }
 
         payload = {
-            "version": "435061a1b5a4c1e26740464bf786efdfa9cb3a3ac488595a2de23e143fdb0117",  # ✅ НОВЫЙ version
+            "version": "3a04c77e765e3cd1ed8b62ca40640e4e10358e419e438202280c6012e1a46a7e",  # ✅ НОВЫЙ version
             "input": {
                 "image": file_url,
                 "prompt": f"{style_key}, masterpiece, best quality",
