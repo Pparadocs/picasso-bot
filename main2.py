@@ -1,113 +1,110 @@
 import os
 import logging
-import requests
-import time
+from io import BytesIO
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
 from aiogram.types import Message
 from aiogram.filters import Command
 from aiohttp import web
+from PIL import Image, ImageFilter, ImageOps, ImageEnhance
 
 # Логирование
 logging.basicConfig(level=logging.INFO)
 
 # Переменные окружения
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 
 # Инициализация
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# Стили (функции обработки)
+STYLES = {
+    "размытие": lambda img: img.filter(ImageFilter.GaussianBlur(radius=5)),
+    "контур": lambda img: img.filter(ImageFilter.CONTOUR),
+    "инверт": lambda img: ImageOps.invert(img.convert("RGB")),
+    "яркость": lambda img: ImageEnhance.Brightness(img).enhance(1.5),
+    "резкость": lambda img: ImageEnhance.Sharpness(img).enhance(2.0),
+    "пиксель-арт": lambda img: img.resize((img.width // 10, img.height // 10), resample=Image.NEAREST).resize((img.width * 10, img.height * 10), resample=Image.NEAREST),
+    "черно-белое": lambda img: img.convert("L").convert("RGB"),
+    "тиснение": lambda img: img.filter(ImageFilter.EMBOSS),
+    "тиснение-2": lambda img: img.filter(ImageFilter.FIND_EDGES),
+}
+
+# Хранилища
+user_style = {}  # {user_id: function}
+
 # Вспомогательные функции
-async def generate_image(message: Message):
+async def process_image(message: Message):
     user_id = message.from_user.id
-    prompt = message.text.strip()
-    if not prompt:
-        await bot.send_message(user_id, "Напиши, что хочешь сгенерировать.")
+    style_func = user_style.get(user_id)
+    if not style_func:
+        await bot.send_message(user_id, "Сначала выбери стиль: " + ", ".join(STYLES.keys()))
         return
 
-    await bot.send_message(user_id, "⏳ Генерирую... (5–10 сек)")
+    await bot.send_message(user_id, "⏳ Обрабатываю...")
+
+    photo = message.photo[-1]
+    try:
+        file = await bot.get_file(photo.file_id)
+        file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
+        response = requests.get(file_url)
+        image_bytes = response.content
+    except Exception as e:
+        logging.error(f"Ошибка получения файла: {e}")
+        await bot.send_message(user_id, "Не удалось загрузить фото. Попробуй снова.")
+        return
 
     try:
-        # ✅ Используем рабочую модель: stability-ai/sdxl
-        headers = {
-            "Authorization": f"Token {REPLICATE_API_TOKEN}",
-            "Content-Type": "application/json"
-        }
+        # ✅ Открываем фото
+        image = Image.open(BytesIO(image_bytes)).convert("RGB")
 
-        # ✅ Новый version
-        version = "7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc"
+        # ✅ Применяем стиль
+        result_image = style_func(image)
 
-        payload = {
-            "version": version,
-            "input": {
-                "prompt": f"{prompt}, masterpiece, best quality",
-                "num_inference_steps": 20
-            }
-        }
-
-        response = requests.post("https://api.replicate.com/v1/predictions", headers=headers, json=payload)
-
-        if response.status_code != 201:
-            # ✅ Безопасный парсинг ошибки
-            try:
-                error_data = response.json()
-                error = error_data.get("detail", f"Ошибка API: {response.status_code}")
-            except Exception:
-                error = f"Ошибка API: {response.status_code}, {response.text[:200]}"
-            await bot.send_message(user_id, f"❌ {error}")
-            logging.error(f"Replicate API error: {response.status_code} - {response.text}")
-            return
-
-        result = response.json()
-        prediction_id = result["id"]
-
-        # Ждём завершения обработки
-        while True:
-            time.sleep(2)
-            status_response = requests.get(f"https://api.replicate.com/v1/predictions/{prediction_id}", headers=headers)
-            status_result = status_response.json()
-
-            if status_result["status"] == "succeeded":
-                output_url = status_result["output"][0]
-                if not output_url:
-                    await bot.send_message(user_id, "❌ Не удалось получить результат. Попробуй снова.")
-                    return
-                await bot.send_photo(user_id, photo=output_url, caption=f"✨ Вот твой арт:\n<i>{prompt}</i>", parse_mode="HTML")
-                break
-            elif status_result["status"] == "failed":
-                await bot.send_message(user_id, "❌ Не удалось сгенерировать. Попробуй другой запрос.")
-                break
-
+        # ✅ Отправляем фото
+        with BytesIO() as output:
+            result_image.save(output, format="JPEG")
+            output.seek(0)
+            await bot.send_photo(user_id, photo=output, caption="✨ Вот твой арт!")
     except Exception as e:
         await bot.send_message(user_id, "Ошибка при генерации. Попробуй позже.")
-        logging.error(f"Exception in generate_image: {e}")
+        logging.error(f"Exception in process_image: {e}")
 
 # Команды
 @dp.message(Command("start"))
 async def start(message: Message):
+    styles_list = ", ".join(STYLES.keys())
     await bot.send_message(
         message.from_user.id,
-        "🎨 Привет! Напиши, что хочешь сгенерировать — и я создам изображение.\n\n"
-        "Например: «кот в космосе», «аниме девушка с мечом»."
+        "🎨 Привет! Я — бот-художник.\n"
+        f"Стили: {styles_list}\n\n"
+        "1. Напиши название стиля\n"
+        "2. Отправь фото\n\n"
+        "Бот бесплатный, без ограничений!"
     )
 
-# Обработка текста (генерация по промту)
+# Обработка текста (выбор стиля)
 @dp.message(lambda msg: msg.text and not msg.photo)
 async def handle_text(message: Message):
-    await generate_image(message)
+    text = message.text.strip().lower()
+    for name, func in STYLES.items():
+        if text == name.lower():
+            user_style[message.from_user.id] = func
+            await bot.send_message(message.from_user.id, f"Отлично! Теперь пришли фото для стиля «{name}».")
+            return
+    await bot.send_message(message.from_user.id, "Неизвестный стиль. Доступные: " + ", ".join(STYLES.keys()))
 
-# Обработка фото (игнорируем)
+# Обработка фото
 @dp.message(lambda msg: msg.photo)
 async def handle_photo(message: Message):
-    await bot.send_message(message.from_user.id, "Я генерирую изображения по тексту. Напиши, что хочешь увидеть.")
+    await process_image(message)
 
 # aiohttp routes
 async def handle_webhook(request: web.Request):
     try:
-        json_string = await request.text()  # ✅ Получаем тело как строку
-        update = Update.model_validate_json(json_string)  # ✅ Парсим строку как JSON
+        json_string = await request.text()
+        update = Update.model_validate_json(json_string)
         await dp.feed_update(bot, update)
         return web.json_response({"ok": True})
     except Exception as e:
@@ -129,6 +126,7 @@ async def on_shutdown(app):
 
 # Запуск
 if __name__ == "__main__":
+    import requests  # Нужен для скачивания фото
     app = web.Application()
     app.add_routes([
         web.post('/webhook', handle_webhook),
