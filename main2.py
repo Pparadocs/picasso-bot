@@ -19,6 +19,21 @@ REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# Стили (теперь это промты)
+STYLES = {
+    "аниме": "anime style, masterpiece, best quality",
+    "ван гог": "painting in style of van gogh, masterpiece, best quality",
+    "киберпанк": "cyberpunk style, masterpiece, best quality",
+    "пиксель-арт": "pixel art style, masterpiece, best quality",
+    "мозаика": "mosaic style, masterpiece, best quality",
+    "конфетти": "candy style, masterpiece, best quality",
+    "удни": "udnie style, masterpiece, best quality",
+    "принцесса дождя": "rain princess style, masterpiece, best quality"
+}
+
+# Хранилища
+user_style = {}  # {user_id: prompt}
+
 # Вспомогательные функции
 async def generate_image(message: Message):
     user_id = message.from_user.id
@@ -103,8 +118,8 @@ async def handle_photo(message: Message):
 # aiohttp routes
 async def handle_webhook(request: web.Request):
     try:
-        json_string = await request.text()
-        update = Update.model_validate_json(request)
+        json_string = await request.text()  # ✅ Получаем тело как строку
+        update = Update.model_validate_json(json_string)  # ✅ Парсим строку как JSON
         await dp.feed_update(bot, update)
         return web.json_response({"ok": True})
     except Exception as e:
