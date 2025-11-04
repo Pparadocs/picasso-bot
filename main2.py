@@ -1,6 +1,7 @@
 import os
 import logging
-import replicate
+import requests
+import time
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
 from aiogram.types import Message
@@ -53,21 +54,44 @@ async def process_image(message: Message):
         return
 
     try:
-        # ✅ Используем Replicate
-        model = "lllyasviel/sd-controlnet-canny:435061a1b5a4c1e26740464bf78612c9ef770585a1a2d6f3e54b7ce1a0c1c876"
-        output = replicate.run(
-            model,
-            input={
+        # ✅ Используем Replicate API через requests
+        headers = {
+            "Authorization": f"Token {REPLICATE_API_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "version": "435061a1b5a4c1e26740464bf78612c9ef770585a1a2d6f3e54b7ce1a0c1c876",  # lllyasviel/sd-controlnet-canny
+            "input": {
                 "image": file_url,
                 "prompt": f"{style_key} style, masterpiece, best quality",
                 "num_inference_steps": 20
             }
-        )
-        if output:
-            # ✅ Отправляем фото
-            await bot.send_photo(user_id, photo=output[0], caption="✨ Вот твой арт!")
-        else:
-            await bot.send_message(user_id, "❌ Не удалось обработать. Попробуй другое фото.")
+        }
+
+        response = requests.post("https://api.replicate.com/v1/predictions", headers=headers, json=payload)
+
+        if response.status_code != 201:
+            await bot.send_message(user_id, f"❌ Ошибка API: {response.status_code}, {response.text}")
+            logging.error(f"Replicate API error: {response.status_code} - {response.text}")
+            return
+
+        result = response.json()
+        prediction_id = result["id"]
+
+        # Ждём завершения обработки
+        while True:
+            time.sleep(2)
+            status_response = requests.get(f"https://api.replicate.com/v1/predictions/{prediction_id}", headers=headers)
+            status_result = status_response.json()
+
+            if status_result["status"] == "succeeded":
+                output_url = status_result["output"][0]
+                await bot.send_photo(user_id, photo=output_url, caption="✨ Вот твой арт!")
+                break
+            elif status_result["status"] == "failed":
+                await bot.send_message(user_id, "❌ Не удалось обработать. Попробуй другое фото.")
+                break
 
     except Exception as e:
         await bot.send_message(user_id, "Ошибка при генерации. Попробуй позже.")
