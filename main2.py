@@ -21,14 +21,14 @@ dp = Dispatcher()
 
 # Стили
 STYLES = {
-    "конфетти": "candy",
-    "мозаика": "mosaic",
-    "принцесса дождя": "rain_princess",
-    "удни": "udnie",
-    "аниме": "anime",
-    "ван гог": "van gogh",
-    "киберпанк": "cyberpunk",
-    "пиксель-арт": "pixel art"
+    "аниме": "anime style",
+    "ван гог": "painting in style of van gogh",
+    "киберпанк": "cyberpunk style",
+    "пиксель-арт": "pixel art style",
+    "мозаика": "mosaic style",
+    "конфетти": "candy style",
+    "удни": "udnie style",
+    "принцесса дождя": "rain princess style"
 }
 
 # Хранилища
@@ -54,17 +54,17 @@ async def process_image(message: Message):
         return
 
     try:
-        # ✅ Используем модель: lllyasviel/sd-controlnet-canny
+        # ✅ Используем рабочую модель: jagilley/controlnet-scribble
         headers = {
             "Authorization": f"Token {REPLICATE_API_TOKEN}",
             "Content-Type": "application/json"
         }
 
         payload = {
-            "version": "435061a1b5a4c1e26740464bf78612c9ef770585a1a2d6f3e54b7ce1a0c1c876",  # lllyasviel/sd-controlnet-canny
+            "version": "435061a1b5a4c1e26740464bf78612c9ef770585a1a2d6f3e54b7ce1a0c1c876",  # jagilley/controlnet-scribble
             "input": {
                 "image": file_url,
-                "prompt": f"{style_key} style, masterpiece, best quality",
+                "prompt": f"{style_key}, masterpiece, best quality",
                 "num_inference_steps": 20
             }
         }
@@ -107,6 +107,7 @@ async def start(message: Message):
         f"Стили: {styles_list}\n\n"
         "1. Напиши название стиля\n"
         "2. Отправь фото\n\n"
+        "Бот бесплатный, без ограничений!"
     )
 
 # Обработка текста (выбор стиля)
