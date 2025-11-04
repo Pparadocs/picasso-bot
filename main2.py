@@ -1,6 +1,4 @@
 import os
-import time
-import re
 import logging
 import requests
 from aiogram import Bot, Dispatcher
@@ -15,8 +13,6 @@ logging.basicConfig(level=logging.INFO)
 # Переменные окружения
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 HF_TOKEN = os.getenv("HF_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-QR_FILE_ID = os.getenv("QR_FILE_ID")
 
 # Инициализация
 bot = Bot(token=BOT_TOKEN)
@@ -31,29 +27,9 @@ STYLES = {
 }
 
 # Хранилища
-user_style = {}                # {user_id: style_key}
-paid_users = {}                # {user_id: timestamp_окончания}
-user_usage_count = {}          # {user_id: count}
-pending_payments = {}          # {user_id: file_id_скрина}
+user_style = {}  # {user_id: style_key}
 
 # Вспомогательные функции
-def is_paid(user_id: int) -> bool:
-    if user_id in paid_users:
-        if time.time() < paid_users[user_id]:
-            return True
-        else:
-            del paid_users[user_id]
-    return False
-
-def can_use_free(user_id: int) -> bool:
-    return user_usage_count.get(user_id, 0) < 2
-
-def increment_usage(user_id: int):
-    user_usage_count[user_id] = user_usage_count.get(user_id, 0) + 1
-
-def grant_access(user_id: int, hours: int = 24):
-    paid_users[user_id] = time.time() + hours * 3600
-
 async def process_image(message: Message):
     user_id = message.from_user.id
     style_key = user_style.get(user_id)
@@ -74,16 +50,15 @@ async def process_image(message: Message):
 
     try:
         import requests
-        # ✅ Исправленный URL для Hugging Face Inference API
-        API_URL = f"https://router.huggingface.co/hf-inference/models/akhooli/fast-style-transfer/{style_key}"
+        # ✅ Рабочий URL для бесплатного доступа к модели
+        API_URL = f"https://api-inference.huggingface.co/models/akhooli/fast-style-transfer"
         headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-        response = requests.post(API_URL, headers=headers, json={"inputs": file_url}, timeout=60)
-
-        # ✅ Проверяем, что ответ не пустой
-        if not response.content:
-            await bot.send_message(user_id, "❌ Ответ от модели пуст. Попробуй позже.")
-            logging.error("HF API вернул пустой ответ.")
-            return
+        # Передаём стиль как часть payload
+        payload = {
+            "inputs": file_url,
+            "parameters": {"style": style_key}
+        }
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
 
         if response.status_code == 200:
             # ✅ Отправляем фото напрямую из байтов
@@ -115,21 +90,7 @@ async def start(message: Message):
         f"Стили: {styles_list}\n\n"
         "1. Напиши название стиля\n"
         "2. Отправь фото\n\n"
-        "У тебя **2 бесплатных использования** — потом /pay"
-    )
-
-@dp.message(Command("pay"))
-async def cmd_pay(message: Message):
-    # ✅ Временно убрана отправка QR-кода, чтобы избежать ошибки `wrong file identifier`
-    await bot.send_message(
-        message.from_user.id,
-        "🎨 Поддержи бота — 99 ₽ за 24 часа неограниченного доступа!\n\n"
-        "✅ Как оплатить:\n"
-        "1. Открой СБП в своём приложении (Сбер, ВТБ, Тинькофф и т.д.).\n"
-        "2. Введи сумму: **99 ₽**\n"
-        "3. Комментарий: *«Бот-артист»*\n"
-        "4. Подтверди перевод.\n\n"
-        "После оплаты пришли скриншот подтверждения — и получишь доступ!"
+        "Бот бесплатный, без ограничений!"
     )
 
 # Обработка текста (выбор стиля)
@@ -146,69 +107,7 @@ async def handle_text(message: Message):
 # Обработка фото
 @dp.message(lambda msg: msg.photo)
 async def handle_photo(message: Message):
-    user_id = message.from_user.id
-
-    if is_paid(user_id):
-        await process_image(message)
-        return
-
-    if can_use_free(user_id):
-        increment_usage(user_id)
-        await process_image(message)
-        remaining = 2 - user_usage_count[user_id]
-        if remaining > 0:
-            await bot.send_message(user_id, f"🎨 Осталось бесплатных использований: {remaining}")
-        else:
-            await bot.send_message(
-                user_id,
-                "🎨 Твои **2 бесплатных использования** закончились!\n"
-                "Хочешь больше? Поддержи бота — 99 ₽ за 24 часа неограниченного доступа!\n"
-                f"🔗 /pay"
-            )
-        return
-
-    # Если лимит превышен
-    await bot.send_message(
-        user_id,
-        "🎨 Лимит бесплатных использований исчерпан.\n"
-        "Поддержи бота — 99 ₽ за 24 часа неограниченного доступа!\n"
-        f"🔗 /pay"
-    )
-
-# Приём скриншотов оплаты
-@dp.message(lambda msg: msg.photo and user_usage_count.get(msg.from_user.id, 0) >= 2 and not is_paid(msg.from_user.id))
-async def handle_payment_proof(message: Message):
-    user_id = message.from_user.id
-    pending_payments[user_id] = message.photo[-1].file_id
-    await bot.send_message(user_id, "✅ Скриншот получен! Ожидай подтверждения (обычно в течение часа).")
-
-    if ADMIN_ID:
-        try:
-            await bot.send_photo(
-                ADMIN_ID,
-                photo=message.photo[-1].file_id,
-                caption=f"📥 Новый платёж!\nID: {user_id}\nUsername: @{message.from_user.username or 'нет'}\n\n"
-                        f"Чтобы подтвердить, отправь: /approve_{user_id}"
-            )
-        except Exception as e:
-            logging.error(f"Не удалось отправить админу: {e}")
-
-# Подтверждение от админа
-@dp.message(lambda msg: str(msg.from_user.id) == str(ADMIN_ID) and msg.text)
-async def admin_approve(message: Message):
-    text = message.text.strip()
-    match = re.match(r"/approve_(\d+)", text)
-    if match:
-        user_id = int(match.group(1))
-        grant_access(user_id, hours=24)
-        try:
-            await bot.send_message(user_id, "✅ Оплата подтверждена! У тебя 24 часа неограниченного доступа. Твори!")
-        except:
-            pass
-        await bot.send_message(ADMIN_ID, f"✅ Доступ выдан пользователю {user_id}")
-        return
-
-    await bot.send_message(ADMIN_ID, "Неизвестная команда. Используй: /approve_123456789")
+    await process_image(message)
 
 # aiohttp routes
 async def handle_webhook(request: web.Request):
