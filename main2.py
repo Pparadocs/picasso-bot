@@ -54,14 +54,14 @@ async def process_image(message: Message):
         return
 
     try:
-        # ✅ Используем рабочую модель: lllyasviel/sd-controlnet-canny
+        # ✅ Используем рабочую модель: jagilley/controlnet-scribble
         headers = {
             "Authorization": f"Token {REPLICATE_API_TOKEN}",
             "Content-Type": "application/json"
         }
 
         payload = {
-            "version": "3a04c77e765e3cd1ed8b62ca40640e4e10358e419e438202280c6012e1a46a7e",  # ✅ НОВЫЙ version
+            "version": "435061a1b5a4c1e26740464bf786efdfa9cb3a3ac488595a2de23e143fdb0117",  # ✅ НОВЫЙ version
             "input": {
                 "image": file_url,
                 "prompt": f"{style_key}, masterpiece, best quality",
@@ -72,7 +72,13 @@ async def process_image(message: Message):
         response = requests.post("https://api.replicate.com/v1/predictions", headers=headers, json=payload)
 
         if response.status_code != 201:
-            await bot.send_message(user_id, f"❌ Ошибка API: {response.status_code}, {response.text}")
+            # ✅ Безопасный парсинг ошибки
+            try:
+                error_data = response.json()
+                error = error_data.get("detail", f"Ошибка API: {response.status_code}")
+            except Exception:
+                error = f"Ошибка API: {response.status_code}, {response.text[:200]}"
+            await bot.send_message(user_id, f"❌ {error}")
             logging.error(f"Replicate API error: {response.status_code} - {response.text}")
             return
 
@@ -87,6 +93,9 @@ async def process_image(message: Message):
 
             if status_result["status"] == "succeeded":
                 output_url = status_result["output"][0]
+                if not output_url:
+                    await bot.send_message(user_id, "❌ Не удалось получить результат. Попробуй снова.")
+                    return
                 await bot.send_photo(user_id, photo=output_url, caption="✨ Вот твой арт!")
                 break
             elif status_result["status"] == "failed":
