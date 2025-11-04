@@ -61,7 +61,7 @@ async def process_image(message: Message):
         }
 
         payload = {
-            "version": "435061a1b5a4c1e26740464bf78612c9ef770585a1a2d6f3e54b7ce1a0c1c876",  # jagilley/controlnet-scribble
+            "version": "435061a1b5a4c1e26740464bf786efdfa9cb3a3ac488595a2de23e143fdb0117",  # ✅ НОВЫЙ version
             "input": {
                 "image": file_url,
                 "prompt": f"{style_key}, masterpiece, best quality",
