@@ -20,10 +20,14 @@ dp = Dispatcher()
 
 # Стили
 STYLES = {
-    "конфетти": "candy",
-    "мозаика": "mosaic",
-    "принцесса дождя": "rain_princess",
-    "удни": "udnie"
+    "конфетти": "candy style",
+    "мозаика": "mosaic style",
+    "принцесса дождя": "rain princess style",
+    "удни": "udnie style",
+    "аниме": "anime style",
+    "ван гог": "painting in style of van gogh",
+    "киберпанк": "cyberpunk style",
+    "пиксель-арт": "pixel art style"
 }
 
 # Хранилища
@@ -50,13 +54,16 @@ async def process_image(message: Message):
 
     try:
         import requests
-        # ✅ Рабочий URL для бесплатного доступа к модели
-        API_URL = f"https://api-inference.huggingface.co/models/akhooli/fast-style-transfer"
+        # ✅ Используем модель stabilityai/stable-diffusion-2-1
+        API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1"
         headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-        # Передаём стиль как часть payload
+        # Передаём стиль как часть prompt
         payload = {
-            "inputs": file_url,
-            "parameters": {"style": style_key}
+            "inputs": f"photo of a person, {style_key}, masterpiece, best quality",
+            "parameters": {
+                "num_inference_steps": 20,
+                "guidance_scale": 7.5
+            }
         }
         response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
 
