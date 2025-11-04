@@ -72,13 +72,7 @@ async def process_image(message: Message):
         response = requests.post("https://api.replicate.com/v1/predictions", headers=headers, json=payload)
 
         if response.status_code != 201:
-            # ✅ Безопасный парсинг ошибки
-            try:
-                error_data = response.json()
-                error = error_data.get("detail", f"Ошибка API: {response.status_code}")
-            except Exception:
-                error = f"Ошибка API: {response.status_code}, {response.text[:200]}"
-            await bot.send_message(user_id, f"❌ {error}")
+            await bot.send_message(user_id, f"❌ Ошибка API: {response.status_code}, {response.text}")
             logging.error(f"Replicate API error: {response.status_code} - {response.text}")
             return
 
@@ -93,9 +87,6 @@ async def process_image(message: Message):
 
             if status_result["status"] == "succeeded":
                 output_url = status_result["output"][0]
-                if not output_url:
-                    await bot.send_message(user_id, "❌ Не удалось получить результат. Попробуй снова.")
-                    return
                 await bot.send_photo(user_id, photo=output_url, caption="✨ Вот твой арт!")
                 break
             elif status_result["status"] == "failed":
