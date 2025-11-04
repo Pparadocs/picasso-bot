@@ -79,6 +79,12 @@ async def process_image(message: Message):
         headers = {"Authorization": f"Bearer {HF_TOKEN}"}
         response = requests.post(API_URL, headers=headers, json={"inputs": file_url}, timeout=60)
 
+        # ✅ Проверяем, что ответ не пустой
+        if not response.content:
+            await bot.send_message(user_id, "❌ Ответ от модели пуст. Попробуй позже.")
+            logging.error("HF API вернул пустой ответ.")
+            return
+
         if response.status_code == 200:
             # ✅ Отправляем фото напрямую из байтов
             await bot.send_photo(user_id, photo=response.content, caption="✨ Вот твой арт!")
