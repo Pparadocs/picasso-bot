@@ -1,122 +1,168 @@
 import os
 import logging
-from aiogram import Bot, Dispatcher
-from aiogram.types import Update
-from aiogram.types import Message
-from aiogram.filters import Command
-from aiohttp import web
+import requests
+from io import BytesIO
+from PIL import Image, ImageFilter, ImageOps, ImageEnhance, ImageDraw, ImageFont
+from flask import Flask, request
+import telegram
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
-# Логирование
-logging.basicConfig(level=logging.INFO)
+# --- Настройки ---
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
+if not TELEGRAM_TOKEN:
+    raise ValueError("Необходимо установить переменную окружения TELEGRAM_TOKEN")
 
-# Переменные окружения
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+APP_URL = os.environ.get('APP_URL')
+if not APP_URL:
+    raise ValueError("Необходимо установить переменную окружения APP_URL")
 
-# Инициализация
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+# --- Логирование ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# Стили (для примера)
+# --- Инициализация Flask ---
+app = Flask(__name__)
+
+# --- Инициализация Telegram Application ---
+application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+# --- Словарь для хранения выбранного стиля пользователем (в реальных условиях используйте БД) ---
+user_styles = {}
+
+# --- Словарь стилей ---
 STYLES = {
-    "конфетти": "candy",
-    "мозаика": "mosaic",
-    "принцесса дождя": "rain_princess",
-    "удни": "udnie"
+    "pixel": "Pixel Art",
+    "anime": "Anime",
+    "vangogh": "Van Gogh",
+    "blur": "Blur",
+    "edge": "Edge Enhance",
+    "contour": "Contour",
+    "emboss": "Emboss"
 }
 
-# Хранилища
-user_style = {}  # {user_id: style_key}
-
-# Вспомогательные функции
-async def process_image(message: Message):
-    user_id = message.from_user.id
-    style_key = user_style.get(user_id)
-    if not style_key:
-        await bot.send_message(user_id, "Сначала выбери стиль: " + ", ".join(STYLES.keys()))
-        return
-
-    await bot.send_message(user_id, "⏳ Обрабатываю... (5–10 сек)")
-
-    photo = message.photo[-1]
+# --- Функция для применения стиля ---
+def apply_style(image_bytes, style):
     try:
-        file = await bot.get_file(photo.file_id)
-        file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
-    except Exception as e:
-        logging.error(f"Ошибка получения файла: {e}")
-        await bot.send_message(user_id, "Не удалось загрузить фото. Попробуй снова.")
-        return
+        image = Image.open(BytesIO(image_bytes))
 
-    try:
-        import requests
-        API_URL = f"https://api-inference.huggingface.co/models/akhooli/fast-style-transfer/{style_key}"
-        headers = {"Authorization": f"Bearer {os.getenv('HF_TOKEN')}"}
-        response = requests.post(API_URL, headers=headers, json={"inputs": file_url}, timeout=60)
-
-        if response.status_code == 200:
-            await bot.send_photo(user_id, photo=response.content, caption="✨ Вот твой арт!")
+        # --- Примеры стилей ---
+        if style == "pixel":
+            # Уменьшаем размер, затем увеличиваем, чтобы получить пиксельный эффект
+            small = image.resize((image.width // 8, image.height // 8), Image.NEAREST) # Уменьшаем в 8 раз
+            processed_image = small.resize(image.size, Image.NEAREST) # Увеличиваем обратно
+        elif style == "anime":
+            # Простой эффект "аниме": повышение резкости и контраста
+            processed_image = image.filter(ImageFilter.SHARPEN)
+            enhancer = ImageEnhance.Contrast(processed_image)
+            processed_image = enhancer.enhance(1.2) # Увеличиваем контраст
+        elif style == "vangogh":
+            # Простой эффект "Ван Гога": сильное размытие и усиление краев
+            # Используем фильтры для имитации мазка кисти
+            blur_img = image.filter(ImageFilter.GaussianBlur(radius=1))
+            edge_img = blur_img.filter(ImageFilter.EDGE_ENHANCE_MORE)
+            # Пытаемся наложить края на размытое изображение (упрощенно)
+            processed_image = Image.blend(blur_img, edge_img, alpha=0.3)
+        elif style == "blur":
+            processed_image = image.filter(ImageFilter.GaussianBlur(radius=2))
+        elif style == "edge":
+            processed_image = image.filter(ImageFilter.EDGE_ENHANCE)
+        elif style == "contour":
+            processed_image = image.filter(ImageFilter.CONTOUR)
+        elif style == "emboss":
+            processed_image = image.filter(ImageFilter.EMBOSS)
         else:
-            error = response.json().get("error", "Неизвестная ошибка API")
-            await bot.send_message(user_id, f"❌ Ошибка обработки: {error}")
-            logging.error(f"HF API error: {response.text}")
+            # Если стиль неизвестен, возвращаем оригинальное изображение
+            processed_image = image
+
+        # Сохраняем в BytesIO для отправки
+        output_buffer = BytesIO()
+        processed_image.save(output_buffer, format='JPEG', quality=90) # Установим качество, чтобы уменьшить размер
+        output_buffer.seek(0)
+        return output_buffer
     except Exception as e:
-        await bot.send_message(user_id, "Ошибка при генерации. Попробуй позже.")
-        logging.error(f"Exception in process_image: {e}")
+        logger.error(f"Ошибка применения стиля '{style}': {e}")
+        return None
 
-# Команды
-@dp.message(Command("start"))
-async def start(message: Message):
-    styles_list = ", ".join(STYLES.keys())
-    await bot.send_message(
-        message.from_user.id,
-        "🎨 Привет! Я — бот-художник.\n"
-        f"Стили: {styles_list}\n\n"
-        "1. Напиши название стиля\n"
-        "2. Отправь фото\n\n"
-        "У тебя **2 бесплатных использования** — потом /pay"
-    )
+# --- Асинхронная функция для обработки выбора стиля (Callback Query) ---
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer() # Отвечаем на callback, чтобы убрать "часики"
 
-@dp.message(Command("setwebhook"))
-async def set_webhook_command(message: Message):
-    webhook_url = f"https://picasso-bot-nilp.onrender.com/webhook"
-    await bot.set_webhook(webhook_url, drop_pending_updates=True)
-    await message.answer(f"✅ Вебхук установлен: {webhook_url}")
+    user_id = query.from_user.id
+    style_choice = query.data
 
-# Обработка текста (выбор стиля)
-@dp.message(lambda msg: msg.text and not msg.photo)
-async def handle_text(message: Message):
-    text = message.text.strip().lower()
-    for name, key in STYLES.items():
-        if text == name.lower():
-            user_style[message.from_user.id] = key
-            await bot.send_message(message.from_user.id, f"Отлично! Теперь пришли фото для стиля «{name}».")
+    if style_choice in STYLES:
+        user_styles[user_id] = style_choice
+        await query.edit_message_text(text=f"Стиль '{STYLES[style_choice]}' выбран! Теперь отправьте изображение для обработки.")
+    else:
+        await query.edit_message_text(text="Произошла ошибка. Пожалуйста, начните снова.")
+
+# --- Асинхронная функция для обработки сообщений ---
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    message = update.effective_message
+
+    logger.info(f"Получено сообщение от {user_id}: {message.text or 'Фото/Документ'}")
+
+    # --- Отвечаем на любое текстовое сообщение ---
+    if message.text:
+        if message.text == "/start":
+             # Создаем inline-клавиатуру с выбором стиля
+            keyboard = [[InlineKeyboardButton(name, callback_data=style)] for style in STYLES.keys()]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await message.reply_text("Привет! Выберите стиль обработки изображения:", reply_markup=reply_markup)
+        else:
+            await message.reply_text("Привет! Отправьте команду /start, чтобы выбрать стиль, а затем пришлите изображение.")
+
+    # --- Обработка изображений ---
+    photo = message.photo
+    document = message.document
+
+    image_bytes = None
+    if photo:
+        file_id = photo[-1].file_id
+        new_file = await context.bot.get_file(file_id)
+        image_bytes = BytesIO()
+        await new_file.download_to_memory(image_bytes)
+    elif document and document.mime_type and document.mime_type.startswith('image/'):
+        new_file = await context.bot.get_file(document.file_id)
+        image_bytes = BytesIO()
+        await new_file.download_to_memory(image_bytes)
+
+    if image_bytes:
+        # Проверяем, выбрал ли пользователь стиль
+        selected_style = user_styles.get(user_id)
+        if not selected_style:
+            await message.reply_text("Сначала выберите стиль обработки с помощью команды /start.")
             return
-    await bot.send_message(message.from_user.id, "Неизвестный стиль. Доступные: " + ", ".join(STYLES.keys()))
 
-# Обработка фото
-@dp.message(lambda msg: msg.photo)
-async def handle_photo(message: Message):
-    await process_image(message)
+        logger.info(f"Начинаю обработку изображения пользователя {user_id} в стиле '{selected_style}'...")
+        processed_image_buffer = apply_style(image_bytes.getvalue(), selected_style)
+        if processed_image_buffer:
+            await message.reply_photo(photo=processed_image_buffer, caption=f"Ваше изображение в стиле '{STYLES[selected_style]}'!")
+            logger.info(f"Изображение пользователя {user_id} успешно обработано в стиле '{selected_style}' и отправлено.")
+        else:
+            await message.reply_text("Произошла ошибка при обработке изображения.")
+            logger.error(f"Функция apply_style вернула None для пользователя {user_id}, стиль '{selected_style}'.")
+    elif not message.text:
+        await message.reply_text("Я получил ваше сообщение, но пока могу обрабатывать только изображения после выбора стиля.")
 
-# aiohttp routes
-async def handle_webhook(request: web.Request):
-    try:
-        json_string = await request.text()
-        update = Update.model_validate_json(json_string)
-        await dp.feed_update(bot, update)
-        return web.json_response({"ok": True})
-    except Exception as e:
-        logging.error(f"Ошибка вебхука: {e}")
-        return web.json_response({"ok": False}, status=500)
 
-async def handle_index(request: web.Request):
-    return web.Response(text="Bot is running", status=200)
+# --- Настройка маршрута для вебхука ---
+@app.route(f'/webhook/{TELEGRAM_TOKEN}', methods=['POST'])
+async def telegram_webhook():
+    """Получает обновления от Telegram и передает их в Application."""
+    update_json = request.get_json()
+    update = Update.de_json(update_json)
+    await application.update_queue.put(update)
+    return 'ok', 200
 
-# Запуск
-if __name__ == "__main__":
-    app = web.Application()
-    app.add_routes([
-        web.post('/webhook', handle_webhook),
-        web.get('/', handle_index),
-    ])
-    port = int(os.getenv("PORT", 10000))
-    web.run_app(app, host="0.0.0.0", port=port)
+# --- Запуск веб-сервера Flask ---
+if __name__ == '__main__':
+    # Регистрируем обработчик сообщений и кнопок
+    application.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.Document.IMAGE, handle_message))
+    application.add_handler(CallbackQueryHandler(button))
+    
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
