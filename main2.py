@@ -2,7 +2,7 @@ import os
 import sys
 import logging
 from flask import Flask, request, jsonify
-from telegram import Bot
+from telegram import Update, Bot  # ← добавлен Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 import wikipedia
 
