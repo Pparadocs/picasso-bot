@@ -81,15 +81,11 @@ def home():
 # Установка webhook при старте
 def set_webhook():
     if WEBHOOK_URL:
-        try:
-            info = bot.get_webhook_info()
-            if info.url != WEBHOOK_URL:
-                bot.set_webhook(url=WEBHOOK_URL)
-                logging.info(f"✅ Webhook установлен: {WEBHOOK_URL}")
-            else:
-                logging.info(f"ℹ️ Webhook уже установлен на: {WEBHOOK_URL}")
-        except Exception as e:
-            logging.error(f"❌ Ошибка установки webhook: {e}")
+        logging.info(f"ℹ️ Webhook должен быть установлен на: {WEBHOOK_URL}")
+        logging.info("ℹ️ Установите webhook вручную через API Telegram.")
+        # python-telegram-bot асинхронный, и вызов bot.get_webhook_info() или set_webhook()
+        # здесь (в синхронной функции при старте) вызовет ошибку.
+        # Лучше установить вручную: см. инструкцию.
     else:
         logging.warning("⚠️ RENDER_URL не задан — webhook не установлен")
 
